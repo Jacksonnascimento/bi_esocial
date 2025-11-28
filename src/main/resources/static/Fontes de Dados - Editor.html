@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Fontes de Dados - Editor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Bootstrap 5 CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #f8f9fa; }
+        .file-card { margin-bottom: 2rem; }
+        .save-btn { min-width: 120px; }
+        .status-msg { font-size: 0.95em; }
+        textarea { font-family: monospace; }
+        .custom-navbar {
+            background: #fff;
+            box-shadow: 0 2px 8px rgb(0 0 0 / 0.07);
+            padding: 0.7rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+<!-- Navbar com botão para voltar ao index -->
+<div class="custom-navbar">
+  <a href="index.html" class="btn btn-outline-primary d-flex align-items-center" style="font-weight: 600;">
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" class="bi bi-arrow-left me-2" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M15 8a.5.5 0 0 1-.5.5H2.707l3.147 3.146a.5.5 0 0 1-.708.708l-4-4a.5.5 0 0 1 0-.708l4-4a.5.5 0 1 1 .708.708L2.707 7.5H14.5A.5.5 0 0 1 15 8z"/></svg>
+    Voltar para Início
+  </a>
+</div>
+
+<div class="container py-4">
+    <h1 class="mb-4 text-center">Fontes de Dados</h1>
+    <div id="arquivos-lista"></div>
+</div>
+
+<!-- Bootstrap JS (opcional, para alertas) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const API_BASE = "http://localhost:8080/api";
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.innerText = text;
+    return div.innerHTML;
+}
+
+function criarCardArquivo(arquivo) {
+    const card = document.createElement('div');
+    card.className = "card file-card shadow-sm";
+    card.innerHTML = `
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <strong>${escapeHtml(arquivo.nomeArquivo)}</strong>
+            <span class="status-msg text-success" style="display:none;"></span>
+        </div>
+        <div class="card-body">
+            <textarea class="form-control mb-3" rows="8">${escapeHtml(arquivo.conteudo)}</textarea>
+            <button class="btn btn-primary save-btn">Salvar Alterações</button>
+        </div>
+    `;
+
+    const textarea = card.querySelector('textarea');
+    const btn = card.querySelector('.save-btn');
+    const statusMsg = card.querySelector('.status-msg');
+
+    btn.addEventListener('click', () => {
+        btn.disabled = true;
+        statusMsg.style.display = "none";
+        fetch(`${API_BASE}/fontes-dados/editar`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                nomeArquivo: arquivo.nomeArquivo,
+                conteudo: textarea.value
+            })
+        })
+        .then(resp => {
+            btn.disabled = false;
+            if (resp.ok) {
+                statusMsg.textContent = "Salvo com sucesso!";
+                statusMsg.className = "status-msg text-success";
+            } else {
+                statusMsg.textContent = "Erro ao salvar!";
+                statusMsg.className = "status-msg text-danger";
+            }
+            statusMsg.style.display = "inline";
+            setTimeout(() => statusMsg.style.display = "none", 2500);
+        })
+        .catch(() => {
+            btn.disabled = false;
+            statusMsg.textContent = "Erro de conexão!";
+            statusMsg.className = "status-msg text-danger";
+            statusMsg.style.display = "inline";
+            setTimeout(() => statusMsg.style.display = "none", 2500);
+        });
+    });
+
+    return card;
+}
+
+function carregarArquivos() {
+    const lista = document.getElementById('arquivos-lista');
+    lista.innerHTML = `<div class="text-center my-5"><div class="spinner-border" role="status"></div></div>`;
+    fetch(`${API_BASE}/fontes-dados`)
+        .then(resp => resp.json())
+        .then(data => {
+            lista.innerHTML = "";
+            if (Array.isArray(data) && data.length > 0) {
+                data.forEach(arquivo => {
+                    lista.appendChild(criarCardArquivo(arquivo));
+                });
+            } else {
+                lista.innerHTML = `<div class="alert alert-warning text-center">Nenhum arquivo encontrado.</div>`;
+            }
+        })
+        .catch(() => {
+            lista.innerHTML = `<div class="alert alert-danger text-center">Erro ao carregar arquivos.</div>`;
+        });
+}
+
+window.onload = carregarArquivos;
+</script>
+</body>
+</html>
