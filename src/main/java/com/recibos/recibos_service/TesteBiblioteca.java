@@ -8,13 +8,13 @@ public class TesteBiblioteca {
     public static void main(String[] args) {
         // --- CONFIGURAÇÃO DO TESTE ---
         // Ajuste este caminho para uma pasta que exista no seu PC e tenha XMLs
-        String pastaTeste = "C:\\xmls_para_teste"; 
+        String pastaTeste = "C:\\Users\\jacks\\Downloads"; 
         
         // Parâmetros de simulação
         int orgCod = 1;
         int ambiente = 1; // 1-Produção
         int usrCod = 157;
-        String filtroEvento = "S-2200"; // Tenta processar apenas S-2200
+        String filtroEvento = "T"; 
         
         System.out.println("=== INICIANDO TESTE DA BIBLIOTECA ===");
         System.out.println("Lendo pasta: " + pastaTeste);
@@ -42,9 +42,9 @@ public class TesteBiblioteca {
         );
 
         // 4. Mostra o resultado no console
-        System.out.println("\n--- SCRIPT GERADO ABAIXO ---\n");
+        
         System.out.println(sqlGerado);
-        System.out.println("\n--- FIM DO SCRIPT ---");
+      
         
         // Dica: Se quiser salvar em arquivo para conferir:
         /*
