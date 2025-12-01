@@ -2,21 +2,21 @@ package com.recibos.recibos_service.util;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 public class ProcessadorEsocialLib {
 
-    /**
-     * Método principal da biblioteca.
-     */
     public String gerarScript(String caminhoPasta, String tipoEventoFiltro, String filtroCompetencia, int orgCod, int ambiente, int usrCod) {
         
-        // Normalização do Filtro
         if (tipoEventoFiltro == null || tipoEventoFiltro.trim().isEmpty()) {
             tipoEventoFiltro = "T";
         }
@@ -27,59 +27,29 @@ public class ProcessadorEsocialLib {
         ArquivoXML leitorXML = new ArquivoXML();
         GeradorSQLRecibo geradorSQL = new GeradorSQLRecibo();
 
-        // 1. LEITURA
+        // 1. LEITURA (Varredura de arquivos XML e ZIP)
         try (Stream<Path> paths = Files.walk(Paths.get(caminhoPasta))) {
             
             paths.filter(Files::isRegularFile)
-                 .filter(p -> p.toString().toLowerCase().endsWith(".xml"))
                  .forEach(path -> {
                      File arquivo = path.toFile();
-                     String nomeArquivo = arquivo.getName();
+                     String nomeArquivo = arquivo.getName().toLowerCase();
 
-                     // Filtro de compatibilidade
-                     if (!filtroFinal.equals("T")) {
-                         if (!isArquivoCompativelComFiltro(nomeArquivo, filtroFinal)) {
-                             return; 
-                         }
+                     // --- CASO 1: ARQUIVO .XML ---
+                     if (nomeArquivo.endsWith(".xml")) {
+                         processarXmlIndividual(arquivo, filtroFinal, filtroCompetencia, leitorXML, dtosUnicos);
                      }
-
-                     try {
-                         InfoReciboDTO info = leitorXML.infXML(arquivo, nomeArquivo);
-                         
-                         if (info.getId() == null && info.getRecibo() == null) {
-                             return; 
-                         }
-                         
-                         if (filtroCompetencia != null && !filtroCompetencia.isEmpty()) {
-                             if (info.getPerApur() != null && !info.getPerApur().isEmpty()) {
-                                 if (!info.getPerApur().equals(filtroCompetencia)) {
-                                     return; 
-                                 }
-                             }
-                         }
-
-                         String tipoEventoDetectado = detectTipo(nomeArquivo); 
-                         String chave = info.getDeduplicationKey(tipoEventoDetectado);
-                         
-                         InfoReciboDTO existente = dtosUnicos.get(chave);
-                         if (existente == null || info.isMaisRecenteQue(existente)) {
-                             dtosUnicos.put(chave, info);
-                         }
-
-                     } catch (Exception e) {
-                         System.err.println("Erro ao ler " + nomeArquivo + ": " + e.getMessage());
+                     // --- CASO 2: ARQUIVO .ZIP ---
+                     else if (nomeArquivo.endsWith(".zip")) {
+                         processarZip(arquivo, filtroFinal, filtroCompetencia, leitorXML, dtosUnicos);
                      }
                  });
 
         } catch (IOException e) {
-            // Em caso de erro de IO, ainda retornamos o erro para saber o que houve,
-            // ou você pode retornar "" aqui também se preferir silêncio total.
-            // Por segurança, mantive o erro, mas se quiser vazio mude para return "";
             return "-- ERRO AO ACESSAR PASTA: " + e.getMessage();
         }
 
         // 2. ESCRITA
-        // Se não achou nada, retorna VAZIO
         if (dtosUnicos.isEmpty()) {
             return ""; 
         }
@@ -100,7 +70,6 @@ public class ProcessadorEsocialLib {
              }
         }
 
-        // Se após processar tudo, não gerou nenhum script (ex: arquivos sem recibo), retorna VAZIO
         if (corpoScripts.length() == 0) {
             return "";
         }
@@ -111,6 +80,67 @@ public class ProcessadorEsocialLib {
         scriptFinal.append(corpoScripts);
 
         return scriptFinal.toString();
+    }
+
+    // --- AUXILIAR: PROCESSA XML SOLTO ---
+    private void processarXmlIndividual(File arquivo, String filtro, String competencia, ArquivoXML leitor, Map<String, InfoReciboDTO> mapa) {
+        if (!filtro.equals("T") && !isArquivoCompativelComFiltro(arquivo.getName(), filtro)) return;
+
+        try {
+            InfoReciboDTO info = leitor.infXML(arquivo, arquivo.getName());
+            adicionarSeValido(info, competencia, mapa);
+        } catch (Exception e) {
+            System.err.println("Erro ao ler XML " + arquivo.getName() + ": " + e.getMessage());
+        }
+    }
+
+    // --- AUXILIAR: PROCESSA ZIP ---
+    private void processarZip(File arquivoZip, String filtro, String competencia, ArquivoXML leitor, Map<String, InfoReciboDTO> mapa) {
+        try (ZipFile zip = new ZipFile(arquivoZip)) {
+            Enumeration<? extends ZipEntry> entries = zip.entries();
+            
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                String nomeEntry = entry.getName(); // Pode incluir pastas internas do zip
+                
+                // Pega apenas o nome do arquivo, sem pastas internas
+                String nomeArquivoPuro = new File(nomeEntry).getName();
+
+                if (!entry.isDirectory() && nomeEntry.toLowerCase().endsWith(".xml")) {
+                    
+                    if (!filtro.equals("T") && !isArquivoCompativelComFiltro(nomeArquivoPuro, filtro)) continue;
+
+                    try (InputStream is = zip.getInputStream(entry)) {
+                        // Passamos o InputStream do ZIP direto para o parser
+                        InfoReciboDTO info = leitor.infXML(is, nomeArquivoPuro, arquivoZip.getAbsolutePath());
+                        adicionarSeValido(info, competencia, mapa);
+                    } catch (Exception e) {
+                        System.err.println("Erro ao ler entrada " + nomeEntry + " no ZIP: " + e.getMessage());
+                    }
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Erro ao abrir ZIP " + arquivoZip.getName() + ": " + e.getMessage());
+        }
+    }
+
+    // --- LÓGICA DE VALIDAÇÃO E DEDUPLICAÇÃO ---
+    private void adicionarSeValido(InfoReciboDTO info, String competencia, Map<String, InfoReciboDTO> mapa) {
+        if (info.getId() == null && info.getRecibo() == null) return;
+
+        if (competencia != null && !competencia.isEmpty()) {
+            if (info.getPerApur() != null && !info.getPerApur().isEmpty()) {
+                if (!info.getPerApur().equals(competencia)) return;
+            }
+        }
+
+        String tipo = detectTipo(info.getNomeArquivo());
+        String chave = info.getDeduplicationKey(tipo);
+        
+        InfoReciboDTO existente = mapa.get(chave);
+        if (existente == null || info.isMaisRecenteQue(existente)) {
+            mapa.put(chave, info);
+        }
     }
     
     private boolean isArquivoCompativelComFiltro(String nomeArquivo, String filtro) {
@@ -126,7 +156,6 @@ public class ProcessadorEsocialLib {
         if (f.contains("1210")) return n.contains("1210") || n.contains("EVTPGTOS");
         if (f.contains("1202")) return n.contains("1202") || n.contains("EVTRMNRPPS");
         
-        // Fallback genérico: se o filtro for parte do nome do arquivo
         return n.contains(f);
     }
     
@@ -137,7 +166,7 @@ public class ProcessadorEsocialLib {
         if (n.contains("2300") || n.contains("EVTTSVINICIO")) return "S-2300";
         if (n.contains("1200") || n.contains("EVTREMUN")) return "S-1200";
         if (n.contains("1210") || n.contains("EVTPGTOS")) return "S-1210";
-        if (n.contains("1202") || n.contains("EVTRMNRPPS")) return "S-1202";
+        if (n.contains("1202")) return "S-1202";
         return nomeArquivo; 
     }
 }
